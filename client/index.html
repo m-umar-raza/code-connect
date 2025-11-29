@@ -66,6 +66,29 @@
                     <div id="participants-list" class="participants-list"></div>
                 </div>
 
+                <!-- Settings Panel -->
+                <div id="settings-panel" class="settings-panel hidden">
+                    <div class="settings-header">
+                        <h3>⚙️ Audio Settings</h3>
+                        <button id="close-settings-btn" class="close-btn">✕</button>
+                    </div>
+                    <div class="settings-content">
+                        <div class="setting-item">
+                            <label for="mic-sensitivity">🎤 Microphone Sensitivity</label>
+                            <div class="slider-container">
+                                <input type="range" id="mic-sensitivity" min="0" max="100" value="50" />
+                                <span id="mic-sensitivity-value" class="slider-value">50%</span>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <label for="audio-output-select">🔊 Audio Output Device</label>
+                            <select id="audio-output-select" class="audio-device-select">
+                                <option value="">Default Speaker</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Chat Panel -->
                 <div id="chat-panel" class="chat-panel hidden">
                     <div class="chat-header">
@@ -84,13 +107,13 @@
                         </select>
                     </div>
                     <div id="chat-messages" class="chat-messages"></div>
+                    <div id="typing-indicator" class="typing-indicator hidden">
+                        <span class="typing-dots"></span>
+                        <span id="typing-user"></span> is typing...
+                    </div>
                     <div class="chat-input-container">
-                        <div id="typing-indicator" class="typing-indicator hidden">
-                            <span class="typing-dots"></span>
-                            <span id="typing-user"></span> is typing...
-                        </div>
                         <input type="text" id="chat-input" placeholder="Send a message to everyone..." />
-                        <button id="send-btn" class="btn-send">Send</button>
+                        <button id="send-btn" class="btn-send">📤</button>
                     </div>
                 </div>
 
@@ -141,6 +164,10 @@
                         <button id="toggle-chat" class="control-btn" data-tooltip="Open chat">
                             <span class="icon">💭</span>
                             <span class="btn-label">Chat</span>
+                        </button>
+                        <button id="toggle-settings" class="control-btn" data-tooltip="Audio settings">
+                            <span class="icon">⚙️</span>
+                            <span class="btn-label">Settings</span>
                         </button>
                         <button id="share-screen" class="control-btn" data-tooltip="Share your screen">
                             <span class="icon">🖥️</span>

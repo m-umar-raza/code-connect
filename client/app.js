@@ -65,6 +65,16 @@ const currentUserNameDisplay = document.getElementById('current-user-name');
 const userInfoBadge = document.getElementById('user-info');
 const translationLanguageSelect = document.getElementById('translation-language');
 const translationStatus = document.getElementById('translation-status');
+const toggleSettingsBtn = document.getElementById('toggle-settings');
+const settingsPanel = document.getElementById('settings-panel');
+const closeSettingsBtn = document.getElementById('close-settings-btn');
+const micSensitivitySlider = document.getElementById('mic-sensitivity');
+const micSensitivityValue = document.getElementById('mic-sensitivity-value');
+const audioOutputSelect = document.getElementById('audio-output-select');
+
+// Audio settings
+let micSensitivity = 0.5; // 0-1 range
+let participantVolumes = new Map(); // Track volume for each participant
 
 // ICE servers configuration (STUN/TURN)
 const iceServers = {
@@ -312,12 +322,17 @@ function addVideoElement(userId, stream) {
     const videoContainer = document.createElement('div');
     videoContainer.className = 'video-container';
     videoContainer.id = `container-${userId}`;
+    videoContainer.setAttribute('data-user-id', userId);
 
     const video = document.createElement('video');
     video.id = `video-${userId}`;
     video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
+    
+    // Set initial volume from saved preference
+    const savedVolume = participantVolumes.get(userId) || 100;
+    video.volume = savedVolume / 100;
 
     const label = document.createElement('div');
     label.className = 'video-label';
@@ -413,6 +428,96 @@ toggleParticipantsBtn.addEventListener('click', () => {
 closeParticipantsBtn.addEventListener('click', () => {
     participantsPanel.classList.add('hidden');
 });
+
+// Settings panel toggle
+if (toggleSettingsBtn) {
+    toggleSettingsBtn.addEventListener('click', () => {
+        settingsPanel.classList.toggle('hidden');
+        chatPanel.classList.add('hidden');
+        participantsPanel.classList.add('hidden');
+        
+        // Load audio output devices
+        loadAudioOutputDevices();
+    });
+}
+
+if (closeSettingsBtn) {
+    closeSettingsBtn.addEventListener('click', () => {
+        settingsPanel.classList.add('hidden');
+    });
+}
+
+// Microphone sensitivity control
+if (micSensitivitySlider) {
+    micSensitivitySlider.addEventListener('input', (e) => {
+        const value = e.target.value;
+        micSensitivity = value / 100;
+        micSensitivityValue.textContent = `${value}%`;
+        
+        // Apply sensitivity to audio context
+        if (audioContext && audioAnalyser) {
+            adjustMicrophoneSensitivity(micSensitivity);
+        }
+    });
+}
+
+// Audio output device selector
+if (audioOutputSelect) {
+    audioOutputSelect.addEventListener('change', async (e) => {
+        const deviceId = e.target.value;
+        await setAudioOutputDevice(deviceId);
+    });
+}
+
+// Load audio output devices
+async function loadAudioOutputDevices() {
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
+        
+        audioOutputSelect.innerHTML = '<option value="">Default Speaker</option>';
+        audioOutputs.forEach(device => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            option.textContent = device.label || `Speaker ${audioOutputs.indexOf(device) + 1}`;
+            audioOutputSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Error loading audio output devices:', error);
+    }
+}
+
+// Set audio output device for all remote videos
+async function setAudioOutputDevice(deviceId) {
+    const remoteVideos = document.querySelectorAll('.video-container:not(.local) video');
+    
+    for (const video of remoteVideos) {
+        if (typeof video.setSinkId === 'function') {
+            try {
+                await video.setSinkId(deviceId || '');
+                console.log('Audio output device set:', deviceId || 'default');
+            } catch (error) {
+                console.error('Error setting audio output device:', error);
+            }
+        }
+    }
+}
+
+// Adjust microphone sensitivity
+function adjustMicrophoneSensitivity(sensitivity) {
+    if (!localStream) return;
+    
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack && audioTrack.applyConstraints) {
+        audioTrack.applyConstraints({
+            autoGainControl: true,
+            noiseSuppression: true,
+            echoCancellation: true,
+            sampleRate: 48000,
+            volume: sensitivity
+        }).catch(err => console.error('Error adjusting mic sensitivity:', err));
+    }
+}
 
 // Chat mode toggle
 everyoneBtn.addEventListener('click', () => {
@@ -1060,6 +1165,9 @@ function updateParticipantsList() {
         const camIcon = participant.isVideoEnabled ? '📹' : '🚫';
         const selfLabel = participant.isSelf ? ' (You)' : '';
         
+        // Get current volume for this participant (default 100%)
+        const currentVolume = participantVolumes.get(id) || 100;
+        
         participantDiv.innerHTML = `
             <div class="participant-info">
                 <span class="participant-name">${escapeHtml(participant.name)}${selfLabel}</span>
@@ -1068,10 +1176,42 @@ function updateParticipantsList() {
                     <span class="status-icon" title="${participant.isVideoEnabled ? 'Camera on' : 'Camera off'}">${camIcon}</span>
                 </div>
             </div>
+            ${!participant.isSelf ? `
+                <div class="participant-volume-control">
+                    <label>🔊 Volume:</label>
+                    <input type="range" min="0" max="100" value="${currentVolume}" class="volume-slider" data-participant-id="${id}" />
+                    <span class="volume-value">${currentVolume}%</span>
+                </div>
+            ` : ''}
         `;
         
         participantsList.appendChild(participantDiv);
+        
+        // Add volume control event listener
+        if (!participant.isSelf) {
+            const volumeSlider = participantDiv.querySelector('.volume-slider');
+            const volumeValue = participantDiv.querySelector('.volume-value');
+            
+            volumeSlider.addEventListener('input', (e) => {
+                const volume = e.target.value;
+                volumeValue.textContent = `${volume}%`;
+                participantVolumes.set(id, volume);
+                setParticipantVolume(id, volume / 100);
+            });
+        }
     });
+}
+
+// Set volume for a specific participant's audio
+function setParticipantVolume(participantId, volume) {
+    const videoContainer = document.querySelector(`[data-user-id="${participantId}"]`);
+    if (videoContainer) {
+        const video = videoContainer.querySelector('video');
+        if (video) {
+            video.volume = Math.max(0, Math.min(1, volume));
+            console.log(`Set volume for ${participantId} to ${volume}`);
+        }
+    }
 }
 
 // Update private recipient options
