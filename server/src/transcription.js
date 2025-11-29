@@ -7,10 +7,38 @@ class TranscriptionService {
     this.whisperEndpoint = process.env.WHISPER_ENDPOINT || 'http://localhost:8000/v1/audio/transcriptions';
     this.libreTranslateEndpoint = process.env.LIBRETRANSLATE_ENDPOINT || 'https://libretranslate.com/translate';
     this.libreTranslateApiKey = process.env.LIBRETRANSLATE_API_KEY || null;
+    this.whisperAvailable = false;
+    
+    // Check if Whisper is available on startup
+    this.checkWhisperAvailability();
     
     // Buffer for accumulating audio chunks
     this.audioBuffers = new Map(); // userId -> Buffer[]
     this.processingIntervals = new Map(); // userId -> setInterval
+  }
+
+  /**
+   * Check if Whisper endpoint is available
+   */
+  async checkWhisperAvailability() {
+    try {
+      // Try a simple health check or test request
+      const testUrl = this.whisperEndpoint.replace('/transcriptions', '/health');
+      await axios.get(testUrl, { timeout: 2000 });
+      this.whisperAvailable = true;
+      console.log('✓ Whisper endpoint is available');
+    } catch (error) {
+      this.whisperAvailable = false;
+      console.log('⚠ Whisper endpoint not available. Captions will use client-side Web Speech API fallback.');
+      console.log('  To enable server-side transcription, see WHISPER_SETUP.md');
+    }
+  }
+
+  /**
+   * Check if Whisper is available
+   */
+  isWhisperAvailable() {
+    return this.whisperAvailable;
   }
 
   /**

@@ -124,6 +124,16 @@ io.on('connection', (socket) => {
       const { userId, targetLanguage } = data;
       userLanguages.set(userId, targetLanguage || null);
       
+      // Check if Whisper is available
+      if (!transcriptionService.isWhisperAvailable()) {
+        // Send message to client to use Web Speech API fallback
+        socket.emit('whisper-unavailable', {
+          message: 'Server-side transcription not available. Using browser fallback.',
+          useClientSide: true
+        });
+        return;
+      }
+      
       transcriptionService.startAudioStream(userId, (result) => {
         // Broadcast transcription to all users in the room
         io.to(roomId).emit('caption-text', {
@@ -136,6 +146,20 @@ io.on('connection', (socket) => {
           timestamp: new Date().toISOString()
         });
       }, targetLanguage);
+    });
+
+    // Handle client-side captions (Web Speech API fallback)
+    socket.on('client-caption-text', (data) => {
+      // Broadcast client-side transcriptions to other users
+      socket.to(roomId).emit('caption-text', {
+        userId: data.userId,
+        userName: rooms.get(roomId).get(data.userId)?.userName || 'Unknown',
+        original: data.text,
+        translated: data.translated || null,
+        targetLanguage: data.targetLanguage || null,
+        isFinal: data.isFinal,
+        timestamp: new Date().toISOString()
+      });
     });
 
     socket.on('stop-transcription', (data) => {
