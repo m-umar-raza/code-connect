@@ -23,6 +23,8 @@ let audioChunks = [];
 let isTranscribing = false;
 let targetTranslationLanguage = null;
 let availableLanguages = [];
+let useClientSideCaption = false;
+let recognition = null;
 
 // DOM elements
 const homeScreen = document.getElementById('home-screen');
@@ -668,6 +670,135 @@ function stopAudioStreaming() {
     }
 }
 
+// Initialize Web Speech API (fallback when Whisper unavailable)
+function initWebSpeechAPI() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+        console.warn('Web Speech API not supported in this browser');
+        return false;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = async (event) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+        
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            
+            if (event.results[i].isFinal) {
+                finalTranscript += transcript + ' ';
+                
+                // Translate if language is selected
+                let translatedText = null;
+                if (targetTranslationLanguage) {
+                    try {
+                        translatedText = await translateText(transcript, targetTranslationLanguage);
+                    } catch (error) {
+                        console.error('Translation error:', error);
+                    }
+                }
+                
+                // Send to server to broadcast to other users
+                socket.emit('client-caption-text', {
+                    userId,
+                    text: transcript,
+                    translated: translatedText,
+                    targetLanguage: targetTranslationLanguage,
+                    isFinal: true
+                });
+                
+                // Update local caption with translation
+                activeCaptions.set('local-user', {
+                    userId: 'You',
+                    original: transcript,
+                    translated: translatedText,
+                    targetLanguage: targetTranslationLanguage,
+                    timestamp: Date.now()
+                });
+            } else {
+                interimTranscript += transcript;
+                
+                // Update local caption (interim)
+                activeCaptions.set('local-user', {
+                    userId: 'You',
+                    original: interimTranscript,
+                    translated: null,
+                    timestamp: Date.now()
+                });
+            }
+        }
+        
+        // Clear existing timeout
+        if (captionTimeouts.has('local-user')) {
+            clearTimeout(captionTimeouts.get('local-user'));
+        }
+        
+        // Set new timeout to clear local caption
+        const timeout = setTimeout(() => {
+            activeCaptions.delete('local-user');
+            renderAllCaptions();
+        }, 5000);
+        
+        captionTimeouts.set('local-user', timeout);
+        renderAllCaptions();
+    };
+
+    recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error === 'no-speech' && isCaptionsEnabled) {
+            setTimeout(() => {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.log('Recognition already started');
+                }
+            }, 1000);
+        }
+    };
+
+    recognition.onend = () => {
+        if (isCaptionsEnabled && useClientSideCaption) {
+            try {
+                recognition.start();
+            } catch (e) {
+                console.log('Recognition already started');
+            }
+        }
+    };
+
+    return true;
+}
+
+// Translate text using LibreTranslate API
+async function translateText(text, targetLang) {
+    if (!text || !targetLang) return null;
+    
+    try {
+        const response = await fetch('https://libretranslate.com/translate', {
+            method: 'POST',
+            body: JSON.stringify({
+                q: text,
+                source: 'en',
+                target: targetLang,
+                format: 'text'
+            }),
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        return data.translatedText || text;
+    } catch (error) {
+        console.error('Translation failed:', error);
+        return null;
+    }
+}
+
 // Update captions display
 function updateCaptionsDisplay() {
     if (!captionsText) return;
@@ -770,13 +901,18 @@ if (toggleCaptionsBtn) {
                 captionsPanel.classList.remove('hidden');
             }
             
-            // Initialize and start audio streaming
+            toggleCaptionsBtn.classList.add('active');
+            captionsText.innerHTML = '<span class="caption-hint">🎤 Initializing captions...</span>';
+            
+            // Try to use server-side transcription first
+            useClientSideCaption = false;
+            
+            // Initialize and start audio streaming for Whisper
             if (!mediaRecorder) {
                 initAudioStreaming();
             }
             
             isTranscribing = true;
-            toggleCaptionsBtn.classList.add('active');
             
             // Notify server to start transcription
             socket.emit('start-transcription', {
@@ -793,7 +929,14 @@ if (toggleCaptionsBtn) {
             
             // Stop transcription
             isTranscribing = false;
+            useClientSideCaption = false;
             stopAudioStreaming();
+            
+            // Stop Web Speech API if it was being used
+            if (recognition) {
+                recognition.stop();
+            }
+            
             toggleCaptionsBtn.classList.remove('active');
             
             // Notify server to stop transcription
@@ -807,6 +950,31 @@ if (toggleCaptionsBtn) {
     });
 }
 
+// Listen for Whisper unavailable message
+socket.on('whisper-unavailable', (data) => {
+    console.log(data.message);
+    
+    if (data.useClientSide) {
+        // Fall back to Web Speech API
+        useClientSideCaption = true;
+        stopAudioStreaming(); // Stop sending audio to server
+        
+        // Initialize and start Web Speech API
+        if (initWebSpeechAPI()) {
+            try {
+                recognition.start();
+                const translationMsg = targetTranslationLanguage ? ' with translation' : '';
+                captionsText.innerHTML = `<span class="caption-hint">🎤 Using browser speech recognition${translationMsg}... Speak now!</span>`;
+            } catch (e) {
+                console.error('Failed to start Web Speech API:', e);
+                captionsText.innerHTML = '<span class="caption-hint">❌ Speech recognition not available</span>';
+            }
+        } else {
+            captionsText.innerHTML = '<span class="caption-hint">❌ Speech recognition not supported in this browser</span>';
+        }
+    }
+});
+
 // Language selector for translation
 if (translationLanguageSelect) {
     translationLanguageSelect.addEventListener('change', (e) => {
@@ -814,10 +982,19 @@ if (translationLanguageSelect) {
         
         // If captions are already running, update the translation language
         if (isTranscribing) {
-            socket.emit('set-translation-language', {
-                userId,
-                targetLanguage: targetTranslationLanguage
-            });
+            if (!useClientSideCaption) {
+                // Server-side mode
+                socket.emit('set-translation-language', {
+                    userId,
+                    targetLanguage: targetTranslationLanguage
+                });
+            } else {
+                // Client-side mode - update message
+                const translationMsg = targetTranslationLanguage ? ' with translation' : '';
+                if (captionsText) {
+                    captionsText.innerHTML = `<span class="caption-hint">🎤 Using browser speech recognition${translationMsg}... Speak now!</span>`;
+                }
+            }
         }
         
         console.log('Translation language set to:', targetTranslationLanguage || 'None');
