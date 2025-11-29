@@ -18,6 +18,7 @@
                 <h1>📹 Video Meet</h1>
             </div>
             <div class="meeting-info">
+                <span id="user-info" class="user-info-badge hidden">👤 <span id="current-user-name"></span></span>
                 <span id="room-name">Room: <span id="room-id"></span></span>
             </div>
         </header>
@@ -31,6 +32,9 @@
                     <p>Connect with colleagues, friends, and family with high-quality video calls</p>
                     
                     <div class="join-options">
+                        <div class="option-group name-group">
+                            <input type="text" id="user-name-input" placeholder="Enter your name" maxlength="20" />
+                        </div>
                         <div class="option-group">
                             <input type="text" id="room-input" placeholder="Enter room code" />
                             <button id="join-btn" class="btn btn-primary">Join Meeting</button>
@@ -48,19 +52,44 @@
                 <div class="video-grid" id="video-grid">
                     <div class="video-container local-video">
                         <video id="local-video" autoplay muted playsinline></video>
-                        <div class="video-label">You</div>
+                        <div class="video-label" id="local-video-label">You</div>
+                        <div class="speaking-indicator" id="local-speaking"></div>
                     </div>
+                </div>
+
+                <!-- Participants Panel -->
+                <div id="participants-panel" class="participants-panel hidden">
+                    <div class="participants-header">
+                        <h3>Participants <span id="participant-count" class="count-badge">1</span></h3>
+                        <button id="close-participants-btn" class="close-btn">✕</button>
+                    </div>
+                    <div id="participants-list" class="participants-list"></div>
                 </div>
 
                 <!-- Chat Panel -->
                 <div id="chat-panel" class="chat-panel hidden">
                     <div class="chat-header">
-                        <h3>Meeting Chat</h3>
+                        <div class="chat-title-section">
+                            <h3>Chat</h3>
+                            <div class="chat-mode-toggle">
+                                <button id="everyone-btn" class="mode-btn active">Everyone</button>
+                                <button id="private-btn" class="mode-btn">Private</button>
+                            </div>
+                        </div>
                         <button id="close-chat-btn" class="close-btn">✕</button>
+                    </div>
+                    <div id="private-chat-selector" class="private-chat-selector hidden">
+                        <select id="private-recipient-select">
+                            <option value="">Select participant...</option>
+                        </select>
                     </div>
                     <div id="chat-messages" class="chat-messages"></div>
                     <div class="chat-input-container">
-                        <input type="text" id="chat-input" placeholder="Send a message..." />
+                        <div id="typing-indicator" class="typing-indicator hidden">
+                            <span class="typing-dots"></span>
+                            <span id="typing-user"></span> is typing...
+                        </div>
+                        <input type="text" id="chat-input" placeholder="Send a message to everyone..." />
                         <button id="send-btn" class="btn-send">Send</button>
                     </div>
                 </div>
@@ -75,27 +104,40 @@
                 <!-- Controls -->
                 <div class="controls">
                     <div class="control-buttons">
-                        <button id="toggle-audio" class="control-btn active" title="Mute">
+                        <button id="toggle-audio" class="control-btn active" data-tooltip="Mute microphone">
                             <span class="icon">🎤</span>
+                            <span class="btn-label">Mic</span>
                         </button>
-                        <button id="toggle-video" class="control-btn active" title="Turn off camera">
+                        <button id="toggle-video" class="control-btn active" data-tooltip="Turn off camera">
                             <span class="icon">📹</span>
+                            <span class="btn-label">Camera</span>
                         </button>
-                        <button id="toggle-captions" class="control-btn" title="Live captions">
+                        <button id="toggle-captions" class="control-btn" data-tooltip="Toggle live captions">
                             <span class="icon">💬</span>
+                            <span class="btn-label">Captions</span>
                         </button>
-                        <button id="toggle-chat" class="control-btn" title="Chat">
+                        <button id="toggle-participants" class="control-btn" data-tooltip="View participants">
+                            <span class="icon">👥</span>
+                            <span class="btn-label">People</span>
+                        </button>
+                        <button id="toggle-chat" class="control-btn" data-tooltip="Open chat">
                             <span class="icon">💭</span>
+                            <span class="btn-label">Chat</span>
                         </button>
-                        <button id="share-screen" class="control-btn" title="Share screen">
+                        <button id="share-screen" class="control-btn" data-tooltip="Share your screen">
                             <span class="icon">🖥️</span>
+                            <span class="btn-label">Share</span>
                         </button>
-                        <button id="leave-btn" class="control-btn leave-btn" title="Leave call">
+                        <button id="leave-btn" class="control-btn leave-btn" data-tooltip="Leave meeting">
                             <span class="icon">📞</span>
+                            <span class="btn-label">Leave</span>
                         </button>
                     </div>
                     <div class="meeting-code">
-                        <button id="copy-code-btn" class="btn-copy">Copy Meeting Code</button>
+                        <button id="copy-code-btn" class="btn-copy">
+                            <span class="copy-icon">📋</span>
+                            <span>Copy Code</span>
+                        </button>
                     </div>
                 </div>
             </div>

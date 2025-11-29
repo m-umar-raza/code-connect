@@ -5,17 +5,28 @@ let localStream;
 let peers = {};
 let roomId;
 let userId;
+let userName = '';
 let isAudioEnabled = true;
 let isVideoEnabled = true;
 let recognition;
 let isCaptionsEnabled = false;
 let finalTranscript = '';
 let interimTranscript = '';
+let activeCaptions = new Map(); // Track captions from all users
+let captionTimeouts = new Map(); // Track timeouts for clearing captions
+let participants = new Map(); // Track all participants {userId: {name, isAudioEnabled, isVideoEnabled}}
+let currentChatMode = 'everyone'; // 'everyone' or 'private'
+let privateRecipient = '';
+let typingTimeout;
+let audioContext;
+let audioAnalyser;
+let isSpeaking = false;
 
 // DOM elements
 const homeScreen = document.getElementById('home-screen');
 const videoScreen = document.getElementById('video-screen');
 const roomInput = document.getElementById('room-input');
+const userNameInput = document.getElementById('user-name-input');
 const joinBtn = document.getElementById('join-btn');
 const createBtn = document.getElementById('create-btn');
 const localVideo = document.getElementById('local-video');
@@ -23,6 +34,7 @@ const videoGrid = document.getElementById('video-grid');
 const toggleAudioBtn = document.getElementById('toggle-audio');
 const toggleVideoBtn = document.getElementById('toggle-video');
 const toggleChatBtn = document.getElementById('toggle-chat');
+const toggleParticipantsBtn = document.getElementById('toggle-participants');
 const shareScreenBtn = document.getElementById('share-screen');
 const leaveBtn = document.getElementById('leave-btn');
 const chatPanel = document.getElementById('chat-panel');
@@ -35,6 +47,18 @@ const roomIdDisplay = document.getElementById('room-id');
 const toggleCaptionsBtn = document.getElementById('toggle-captions');
 const captionsPanel = document.getElementById('captions-panel');
 const captionsText = document.getElementById('captions-text');
+const participantsPanel = document.getElementById('participants-panel');
+const closeParticipantsBtn = document.getElementById('close-participants-btn');
+const participantsList = document.getElementById('participants-list');
+const participantCount = document.getElementById('participant-count');
+const everyoneBtn = document.getElementById('everyone-btn');
+const privateBtn = document.getElementById('private-btn');
+const privateChatSelector = document.getElementById('private-chat-selector');
+const privateRecipientSelect = document.getElementById('private-recipient-select');
+const typingIndicator = document.getElementById('typing-indicator');
+const typingUser = document.getElementById('typing-user');
+const currentUserNameDisplay = document.getElementById('current-user-name');
+const userInfoBadge = document.getElementById('user-info');
 
 // ICE servers configuration (STUN/TURN)
 const iceServers = {
@@ -49,12 +73,14 @@ userId = 'user_' + Math.random().toString(36).substr(2, 9);
 
 // Create new meeting
 createBtn.addEventListener('click', () => {
+    userName = userNameInput.value.trim() || 'Guest';
     roomId = 'room_' + Math.random().toString(36).substr(2, 9);
     joinRoom();
 });
 
 // Join existing meeting
 joinBtn.addEventListener('click', () => {
+    userName = userNameInput.value.trim() || 'Guest';
     roomId = roomInput.value.trim();
     if (roomId) {
         joinRoom();
@@ -73,25 +99,61 @@ async function joinRoom() {
         });
 
         localVideo.srcObject = localStream;
+        
+        // Setup audio monitoring for speaking indicator
+        setupAudioMonitoring();
 
         // Switch screens
         homeScreen.classList.add('hidden');
         videoScreen.classList.remove('hidden');
         roomIdDisplay.textContent = roomId;
+        currentUserNameDisplay.textContent = userName;
+        userInfoBadge.classList.remove('hidden');
+        
+        // Update local video label
+        document.getElementById('local-video-label').textContent = userName + ' (You)';
+        
+        // Add self to participants
+        participants.set(userId, { 
+            name: userName, 
+            isAudioEnabled: true, 
+            isVideoEnabled: true,
+            isSelf: true
+        });
+        updateParticipantsList();
 
-        // Join room via socket
-        socket.emit('join-room', roomId, userId);
+        // Join room via socket with user info
+        socket.emit('join-room', roomId, { userId, userName });
 
         // Listen for existing users
         socket.on('existing-users', (users) => {
-            users.forEach(otherUserId => {
-                connectToUser(otherUserId, true);
+            users.forEach(user => {
+                participants.set(user.userId, {
+                    name: user.userName,
+                    isAudioEnabled: true,
+                    isVideoEnabled: true,
+                    isSelf: false
+                });
+                connectToUser(user.userId, true);
             });
+            updateParticipantsList();
+            updatePrivateRecipientOptions();
         });
 
         // Listen for new users
-        socket.on('user-connected', (otherUserId) => {
-            console.log('User connected:', otherUserId);
+        socket.on('user-connected', (userData) => {
+            console.log('User connected:', userData);
+            participants.set(userData.userId, {
+                name: userData.userName,
+                isAudioEnabled: true,
+                isVideoEnabled: true,
+                isSelf: false
+            });
+            updateParticipantsList();
+            updatePrivateRecipientOptions();
+            
+            // Show notification
+            showNotification(`${userData.userName} joined the meeting`);
         });
 
         // Handle WebRTC signaling
@@ -108,17 +170,48 @@ async function joinRoom() {
         });
 
         // Handle user disconnection
-        socket.on('user-disconnected', (otherUserId) => {
-            if (peers[otherUserId]) {
-                peers[otherUserId].close();
-                delete peers[otherUserId];
-                removeVideoElement(otherUserId);
+        socket.on('user-disconnected', (userInfo) => {
+            if (peers[userInfo.userId]) {
+                peers[userInfo.userId].close();
+                delete peers[userInfo.userId];
+                removeVideoElement(userInfo.userId);
+            }
+            const user = participants.get(userInfo.userId);
+            if (user) {
+                showNotification(`${user.name} left the meeting`);
+                participants.delete(userInfo.userId);
+                updateParticipantsList();
+                updatePrivateRecipientOptions();
             }
         });
 
         // Chat messages
         socket.on('chat-message', (data) => {
             addChatMessage(data);
+        });
+        
+        // Private messages
+        socket.on('private-message', (data) => {
+            addChatMessage(data, true);
+        });
+        
+        // Typing indicator
+        socket.on('user-typing', (data) => {
+            showTypingIndicator(data.userName);
+        });
+        
+        socket.on('user-stopped-typing', () => {
+            hideTypingIndicator();
+        });
+        
+        // Media state changes
+        socket.on('user-media-state', (data) => {
+            const participant = participants.get(data.userId);
+            if (participant) {
+                participant.isAudioEnabled = data.isAudioEnabled;
+                participant.isVideoEnabled = data.isVideoEnabled;
+                updateParticipantsList();
+            }
         });
 
     } catch (error) {
@@ -222,10 +315,16 @@ function addVideoElement(userId, stream) {
 
     const label = document.createElement('div');
     label.className = 'video-label';
-    label.textContent = userId.substr(0, 10);
+    const participant = participants.get(userId);
+    label.textContent = participant ? participant.name : userId.substr(0, 10);
+    
+    const speakingIndicator = document.createElement('div');
+    speakingIndicator.className = 'speaking-indicator';
+    speakingIndicator.id = `speaking-${userId}`;
 
     videoContainer.appendChild(video);
     videoContainer.appendChild(label);
+    videoContainer.appendChild(speakingIndicator);
     videoGrid.appendChild(videoContainer);
 }
 
@@ -243,6 +342,22 @@ toggleAudioBtn.addEventListener('click', () => {
     localStream.getAudioTracks()[0].enabled = isAudioEnabled;
     toggleAudioBtn.classList.toggle('active');
     toggleAudioBtn.querySelector('.icon').textContent = isAudioEnabled ? '🎤' : '🔇';
+    toggleAudioBtn.setAttribute('data-tooltip', isAudioEnabled ? 'Mute microphone' : 'Unmute microphone');
+    
+    // Broadcast media state change
+    socket.emit('media-state-change', {
+        roomId,
+        userId,
+        isAudioEnabled,
+        isVideoEnabled
+    });
+    
+    // Update participants list
+    const self = participants.get(userId);
+    if (self) {
+        self.isAudioEnabled = isAudioEnabled;
+        updateParticipantsList();
+    }
 });
 
 // Toggle video
@@ -251,15 +366,85 @@ toggleVideoBtn.addEventListener('click', () => {
     localStream.getVideoTracks()[0].enabled = isVideoEnabled;
     toggleVideoBtn.classList.toggle('active');
     toggleVideoBtn.querySelector('.icon').textContent = isVideoEnabled ? '📹' : '🚫';
+    toggleVideoBtn.setAttribute('data-tooltip', isVideoEnabled ? 'Turn off camera' : 'Turn on camera');
+    
+    // Broadcast media state change
+    socket.emit('media-state-change', {
+        roomId,
+        userId,
+        isAudioEnabled,
+        isVideoEnabled
+    });
+    
+    // Update participants list
+    const self = participants.get(userId);
+    if (self) {
+        self.isVideoEnabled = isVideoEnabled;
+        updateParticipantsList();
+    }
 });
 
 // Toggle chat
 toggleChatBtn.addEventListener('click', () => {
     chatPanel.classList.toggle('hidden');
+    if (participantsPanel && !participantsPanel.classList.contains('hidden')) {
+        participantsPanel.classList.add('hidden');
+    }
 });
 
 closeChatBtn.addEventListener('click', () => {
     chatPanel.classList.add('hidden');
+});
+
+// Toggle participants
+toggleParticipantsBtn.addEventListener('click', () => {
+    participantsPanel.classList.toggle('hidden');
+    if (chatPanel && !chatPanel.classList.contains('hidden')) {
+        chatPanel.classList.add('hidden');
+    }
+});
+
+closeParticipantsBtn.addEventListener('click', () => {
+    participantsPanel.classList.add('hidden');
+});
+
+// Chat mode toggle
+everyoneBtn.addEventListener('click', () => {
+    currentChatMode = 'everyone';
+    everyoneBtn.classList.add('active');
+    privateBtn.classList.remove('active');
+    privateChatSelector.classList.add('hidden');
+    chatInput.placeholder = 'Send a message to everyone...';
+    privateRecipient = '';
+});
+
+privateBtn.addEventListener('click', () => {
+    currentChatMode = 'private';
+    privateBtn.classList.add('active');
+    everyoneBtn.classList.remove('active');
+    privateChatSelector.classList.remove('hidden');
+    chatInput.placeholder = 'Send a private message...';
+});
+
+privateRecipientSelect.addEventListener('change', (e) => {
+    privateRecipient = e.target.value;
+    if (privateRecipient) {
+        const recipient = participants.get(privateRecipient);
+        chatInput.placeholder = `Send a private message to ${recipient?.name || 'Unknown'}...`;
+    }
+});
+
+// Typing indicator
+chatInput.addEventListener('input', () => {
+    if (typingTimeout) {
+        clearTimeout(typingTimeout);
+    }
+    
+    socket.emit('typing', { roomId, userName });
+    
+    typingTimeout = setTimeout(() => {
+        socket.emit('stop-typing', { roomId });
+    }, 1000);
 });
 
 // Send chat message
@@ -273,24 +458,63 @@ chatInput.addEventListener('keypress', (e) => {
 function sendMessage() {
     const message = chatInput.value.trim();
     if (message) {
-        socket.emit('chat-message', message);
+        if (currentChatMode === 'private' && privateRecipient) {
+            // Send private message
+            socket.emit('private-message', {
+                roomId,
+                from: userId,
+                fromName: userName,
+                to: privateRecipient,
+                toName: participants.get(privateRecipient)?.name || 'Unknown',
+                message
+            });
+            // Show in own chat
+            addChatMessage({
+                userId,
+                userName,
+                message,
+                timestamp: new Date().toISOString(),
+                isPrivate: true,
+                recipientName: participants.get(privateRecipient)?.name
+            }, true);
+        } else {
+            // Send to everyone
+            socket.emit('chat-message', { roomId, userId, userName, message });
+        }
         chatInput.value = '';
+        socket.emit('stop-typing', { roomId });
     }
 }
 
 // Add chat message to UI
-function addChatMessage(data) {
+function addChatMessage(data, isPrivateMsg = false) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'chat-message';
     
     const isOwn = data.userId === userId;
     messageDiv.classList.add(isOwn ? 'own-message' : 'other-message');
+    
+    if (isPrivateMsg || data.isPrivate) {
+        messageDiv.classList.add('private-message');
+    }
 
     const time = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     
+    const displayName = data.userName || (isOwn ? 'You' : participants.get(data.userId)?.name || data.userId.substr(0, 10));
+    
+    let privateLabel = '';
+    if (isPrivateMsg || data.isPrivate) {
+        if (isOwn) {
+            privateLabel = `<span class="private-label">Private to ${data.recipientName || data.toName}</span>`;
+        } else {
+            privateLabel = '<span class="private-label">Private Message</span>';
+        }
+    }
+    
     messageDiv.innerHTML = `
         <div class="message-header">
-            <span class="message-user">${isOwn ? 'You' : data.userId.substr(0, 10)}</span>
+            <span class="message-user">${isOwn ? 'You' : escapeHtml(displayName)}</span>
+            ${privateLabel}
             <span class="message-time">${time}</span>
         </div>
         <div class="message-text">${escapeHtml(data.message)}</div>
@@ -460,38 +684,83 @@ function updateCaptionsDisplay() {
     
     const displayText = (finalTranscript + interimTranscript).trim();
     if (displayText) {
-        captionsText.innerHTML = `<span class="user-name">You:</span> ${escapeHtml(displayText)}`;
+        // Update local user's caption
+        activeCaptions.set('local-user', {
+            userId: 'You',
+            text: displayText,
+            timestamp: Date.now()
+        });
         
-        // Auto-scroll
-        captionsText.scrollTop = captionsText.scrollHeight;
+        // Clear existing timeout
+        if (captionTimeouts.has('local-user')) {
+            clearTimeout(captionTimeouts.get('local-user'));
+        }
         
-        // Clear old transcript after 5 seconds
-        setTimeout(() => {
+        // Set new timeout to clear local caption
+        const timeout = setTimeout(() => {
+            activeCaptions.delete('local-user');
             finalTranscript = '';
             interimTranscript = '';
-            if (!interimTranscript) {
-                captionsText.innerHTML = '<span class="caption-hint">Speak to see captions...</span>';
-            }
+            renderAllCaptions();
         }, 5000);
+        
+        captionTimeouts.set('local-user', timeout);
+        renderAllCaptions();
     }
+}
+
+// Render all active captions
+function renderAllCaptions() {
+    if (!captionsText) return;
+    
+    if (activeCaptions.size === 0) {
+        captionsText.innerHTML = '<div class="caption-hint">🎤 Speak to see captions...</div>';
+        return;
+    }
+    
+    let html = '';
+    activeCaptions.forEach((caption, key) => {
+        const colorClass = key === 'local-user' ? 'local-caption' : 'remote-caption';
+        html += `
+            <div class="caption-item ${colorClass}">
+                <span class="user-name">${escapeHtml(caption.userId)}:</span>
+                <span class="caption-content">${escapeHtml(caption.text)}</span>
+            </div>
+        `;
+    });
+    
+    captionsText.innerHTML = html;
+    captionsText.scrollTop = captionsText.scrollHeight;
 }
 
 // Display captions from other users
 function displayRemoteCaption(data) {
     if (!captionsText || !isCaptionsEnabled) return;
     
-    const userName = data.userId.substr(0, 10);
-    const captionHtml = `<div class="remote-caption"><span class="user-name">${userName}:</span> ${escapeHtml(data.text)}</div>`;
+    const participant = participants.get(data.userId);
+    const displayName = participant ? participant.name : data.userId.substr(0, 10);
+    const captionKey = `remote-${data.userId}`;
     
-    captionsText.innerHTML = captionHtml;
-    captionsText.scrollTop = captionsText.scrollHeight;
+    // Update caption for this user
+    activeCaptions.set(captionKey, {
+        userId: displayName,
+        text: data.text,
+        timestamp: Date.now()
+    });
     
-    // Clear remote caption after 5 seconds
-    setTimeout(() => {
-        if (captionsText.innerHTML.includes(userName)) {
-            captionsText.innerHTML = '<span class="caption-hint">Speak to see captions...</span>';
-        }
+    // Clear existing timeout for this user
+    if (captionTimeouts.has(captionKey)) {
+        clearTimeout(captionTimeouts.get(captionKey));
+    }
+    
+    // Set new timeout to clear this user's caption
+    const timeout = setTimeout(() => {
+        activeCaptions.delete(captionKey);
+        renderAllCaptions();
     }, 5000);
+    
+    captionTimeouts.set(captionKey, timeout);
+    renderAllCaptions();
 }
 
 // Toggle captions
@@ -531,9 +800,12 @@ if (toggleCaptionsBtn) {
                 toggleCaptionsBtn.classList.remove('active');
             }
             
-            // Clear transcripts
+            // Clear all captions and timeouts
             finalTranscript = '';
             interimTranscript = '';
+            captionTimeouts.forEach(timeout => clearTimeout(timeout));
+            captionTimeouts.clear();
+            activeCaptions.clear();
         }
     });
 }
@@ -542,3 +814,124 @@ if (toggleCaptionsBtn) {
 socket.on('caption-text', (data) => {
     displayRemoteCaption(data);
 });
+
+// ==================== NEW UTILITY FUNCTIONS ====================
+
+// Update participants list
+function updateParticipantsList() {
+    participantsList.innerHTML = '';
+    participantCount.textContent = participants.size;
+    
+    participants.forEach((participant, id) => {
+        const participantDiv = document.createElement('div');
+        participantDiv.className = 'participant-item';
+        
+        const micIcon = participant.isAudioEnabled ? '🎤' : '🔇';
+        const camIcon = participant.isVideoEnabled ? '📹' : '🚫';
+        const selfLabel = participant.isSelf ? ' (You)' : '';
+        
+        participantDiv.innerHTML = `
+            <div class="participant-info">
+                <span class="participant-name">${escapeHtml(participant.name)}${selfLabel}</span>
+                <div class="participant-status">
+                    <span class="status-icon" title="${participant.isAudioEnabled ? 'Mic on' : 'Mic off'}">${micIcon}</span>
+                    <span class="status-icon" title="${participant.isVideoEnabled ? 'Camera on' : 'Camera off'}">${camIcon}</span>
+                </div>
+            </div>
+        `;
+        
+        participantsList.appendChild(participantDiv);
+    });
+}
+
+// Update private recipient options
+function updatePrivateRecipientOptions() {
+    const currentValue = privateRecipientSelect.value;
+    privateRecipientSelect.innerHTML = '<option value="">Select participant...</option>';
+    
+    participants.forEach((participant, id) => {
+        if (!participant.isSelf) {
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = participant.name;
+            privateRecipientSelect.appendChild(option);
+        }
+    });
+    
+    // Restore previous selection if still valid
+    if (currentValue && participants.has(currentValue)) {
+        privateRecipientSelect.value = currentValue;
+    }
+}
+
+// Show typing indicator
+function showTypingIndicator(userName) {
+    typingUser.textContent = userName;
+    typingIndicator.classList.remove('hidden');
+}
+
+// Hide typing indicator
+function hideTypingIndicator() {
+    typingIndicator.classList.add('hidden');
+}
+
+// Show notification
+function showNotification(message) {
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.classList.add('show');
+    }, 10);
+    
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => {
+            notification.remove();
+        }, 300);
+    }, 3000);
+}
+
+// Setup audio monitoring for speaking indicator
+function setupAudioMonitoring() {
+    try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioAnalyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(localStream);
+        source.connect(audioAnalyser);
+        audioAnalyser.fftSize = 256;
+        
+        const bufferLength = audioAnalyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        
+        function checkAudioLevel() {
+            audioAnalyser.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+            
+            const localSpeaking = document.getElementById('local-speaking');
+            if (average > 30) { // Threshold for speaking
+                if (!isSpeaking) {
+                    isSpeaking = true;
+                    if (localSpeaking) {
+                        localSpeaking.classList.add('active');
+                    }
+                }
+            } else {
+                if (isSpeaking) {
+                    isSpeaking = false;
+                    if (localSpeaking) {
+                        localSpeaking.classList.remove('active');
+                    }
+                }
+            }
+            
+            requestAnimationFrame(checkAudioLevel);
+        }
+        
+        checkAudioLevel();
+    } catch (error) {
+        console.error('Error setting up audio monitoring:', error);
+    }
+}
