@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Meet - Google Meet Clone</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <h1>📹 Video Meet</h1>
+            </div>
+            <div class="meeting-info">
+                <span id="room-name">Room: <span id="room-id"></span></span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Home Screen -->
+            <div id="home-screen" class="home-screen">
+                <div class="welcome-card">
+                    <h2>Premium video meetings. Now free for everyone.</h2>
+                    <p>Connect with colleagues, friends, and family with high-quality video calls</p>
+                    
+                    <div class="join-options">
+                        <div class="option-group">
+                            <input type="text" id="room-input" placeholder="Enter room code" />
+                            <button id="join-btn" class="btn btn-primary">Join Meeting</button>
+                        </div>
+                        <div class="option-group">
+                            <button id="create-btn" class="btn btn-secondary">Create New Meeting</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Video Call Screen -->
+            <div id="video-screen" class="video-screen hidden">
+                <!-- Video Grid -->
+                <div class="video-grid" id="video-grid">
+                    <div class="video-container local-video">
+                        <video id="local-video" autoplay muted playsinline></video>
+                        <div class="video-label">You</div>
+                    </div>
+                </div>
+
+                <!-- Chat Panel -->
+                <div id="chat-panel" class="chat-panel hidden">
+                    <div class="chat-header">
+                        <h3>Meeting Chat</h3>
+                        <button id="close-chat-btn" class="close-btn">✕</button>
+                    </div>
+                    <div id="chat-messages" class="chat-messages"></div>
+                    <div class="chat-input-container">
+                        <input type="text" id="chat-input" placeholder="Send a message..." />
+                        <button id="send-btn" class="btn-send">Send</button>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="controls">
+                    <div class="control-buttons">
+                        <button id="toggle-audio" class="control-btn active" title="Mute">
+                            <span class="icon">🎤</span>
+                        </button>
+                        <button id="toggle-video" class="control-btn active" title="Turn off camera">
+                            <span class="icon">📹</span>
+                        </button>
+                        <button id="toggle-chat" class="control-btn" title="Chat">
+                            <span class="icon">💬</span>
+                        </button>
+                        <button id="share-screen" class="control-btn" title="Share screen">
+                            <span class="icon">🖥️</span>
+                        </button>
+                        <button id="leave-btn" class="control-btn leave-btn" title="Leave call">
+                            <span class="icon">📞</span>
+                        </button>
+                    </div>
+                    <div class="meeting-code">
+                        <button id="copy-code-btn" class="btn-copy">Copy Meeting Code</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
