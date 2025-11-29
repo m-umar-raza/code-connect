@@ -3,6 +3,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const cors = require('cors');
+const TranscriptionService = require('./transcription');
 
 const app = express();
 const server = http.createServer(app);
@@ -10,7 +11,8 @@ const io = socketIo(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  maxHttpBufferSize: 1e8 // 100MB for audio streaming
 });
 
 app.use(cors());
@@ -18,6 +20,8 @@ app.use(express.static(path.join(__dirname, '../../client')));
 
 // Store active rooms and users
 const rooms = new Map(); // roomId -> Set of {userId, userName, socketId}
+const transcriptionService = new TranscriptionService();
+const userLanguages = new Map(); // userId -> targetLanguage
 
 io.on('connection', (socket) => {
   console.log('New user connected:', socket.id);
@@ -115,14 +119,51 @@ io.on('connection', (socket) => {
       });
     });
 
-    // Handle captions/transcription
-    socket.on('caption-text', (data) => {
-      socket.to(roomId).emit('caption-text', {
-        userId: data.userId,
-        text: data.text,
-        isFinal: data.isFinal,
-        timestamp: new Date().toISOString()
-      });
+    // Handle captions/transcription with Whisper + LibreTranslate
+    socket.on('start-transcription', (data) => {
+      const { userId, targetLanguage } = data;
+      userLanguages.set(userId, targetLanguage || null);
+      
+      transcriptionService.startAudioStream(userId, (result) => {
+        // Broadcast transcription to all users in the room
+        io.to(roomId).emit('caption-text', {
+          userId: userId,
+          userName: rooms.get(roomId).get(userId)?.userName || 'Unknown',
+          original: result.original,
+          translated: result.translated,
+          targetLanguage: result.targetLanguage,
+          isFinal: result.isFinal,
+          timestamp: new Date().toISOString()
+        });
+      }, targetLanguage);
+    });
+
+    socket.on('stop-transcription', (data) => {
+      const { userId } = data;
+      transcriptionService.stopAudioStream(userId);
+      userLanguages.delete(userId);
+    });
+
+    socket.on('audio-chunk', (data) => {
+      const { userId, audioData } = data;
+      if (audioData && audioData.length > 0) {
+        // Convert base64 to buffer if needed
+        const buffer = Buffer.isBuffer(audioData) 
+          ? audioData 
+          : Buffer.from(audioData, 'base64');
+        transcriptionService.addAudioChunk(userId, buffer);
+      }
+    });
+
+    socket.on('set-translation-language', (data) => {
+      const { userId, targetLanguage } = data;
+      userLanguages.set(userId, targetLanguage);
+    });
+
+    // Get available languages for translation
+    socket.on('get-languages', async () => {
+      const languages = await transcriptionService.getAvailableLanguages();
+      socket.emit('available-languages', languages);
     });
 
     // Handle user disconnection
@@ -130,6 +171,10 @@ io.on('connection', (socket) => {
       rooms.forEach((users, roomId) => {
         users.forEach((user, userId) => {
           if (user.socketId === socket.id) {
+            // Stop transcription for disconnected user
+            transcriptionService.stopAudioStream(userId);
+            userLanguages.delete(userId);
+            
             users.delete(userId);
             if (users.size === 0) {
               rooms.delete(roomId);

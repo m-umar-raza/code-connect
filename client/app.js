@@ -8,10 +8,7 @@ let userId;
 let userName = '';
 let isAudioEnabled = true;
 let isVideoEnabled = true;
-let recognition;
 let isCaptionsEnabled = false;
-let finalTranscript = '';
-let interimTranscript = '';
 let activeCaptions = new Map(); // Track captions from all users
 let captionTimeouts = new Map(); // Track timeouts for clearing captions
 let participants = new Map(); // Track all participants {userId: {name, isAudioEnabled, isVideoEnabled}}
@@ -21,6 +18,11 @@ let typingTimeout;
 let audioContext;
 let audioAnalyser;
 let isSpeaking = false;
+let mediaRecorder;
+let audioChunks = [];
+let isTranscribing = false;
+let targetTranslationLanguage = null;
+let availableLanguages = [];
 
 // DOM elements
 const homeScreen = document.getElementById('home-screen');
@@ -59,6 +61,7 @@ const typingIndicator = document.getElementById('typing-indicator');
 const typingUser = document.getElementById('typing-user');
 const currentUserNameDisplay = document.getElementById('current-user-name');
 const userInfoBadge = document.getElementById('user-info');
+const translationLanguageSelect = document.getElementById('translation-language');
 
 // ICE servers configuration (STUN/TURN)
 const iceServers = {
@@ -589,9 +592,10 @@ function leaveCall() {
         localStream.getTracks().forEach(track => track.stop());
     }
 
-    // Stop speech recognition
-    if (recognition) {
-        recognition.stop();
+    // Stop transcription
+    if (isTranscribing) {
+        socket.emit('stop-transcription', { userId });
+        stopAudioStreaming();
     }
 
     // Close all peer connections
@@ -607,75 +611,61 @@ function leaveCall() {
 
 // ==================== CAPTIONS FUNCTIONALITY ====================
 
-// Initialize Speech Recognition (Web Speech API)
-function initSpeechRecognition() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-        console.warn('Speech Recognition not supported in this browser');
-        if (toggleCaptionsBtn) {
-            toggleCaptionsBtn.style.display = 'none';
-        }
+// Initialize Audio Streaming for Whisper transcription
+function initAudioStreaming() {
+    if (!localStream) {
+        console.warn('No local stream available for transcription');
         return;
     }
 
-    recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => {
-        console.log('Speech recognition started');
-    };
-
-    recognition.onresult = (event) => {
-        interimTranscript = '';
-        
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript;
-            
-            if (event.results[i].isFinal) {
-                finalTranscript += transcript + ' ';
-                
-                // Broadcast captions to other users
-                socket.emit('caption-text', {
-                    userId,
-                    text: transcript,
-                    isFinal: true
-                });
-            } else {
-                interimTranscript += transcript;
-            }
+    try {
+        // Create MediaRecorder to capture audio
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (!audioTrack) {
+            console.warn('No audio track available');
+            return;
         }
-        
-        updateCaptionsDisplay();
-    };
 
-    recognition.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        if (event.error === 'no-speech') {
-            // Restart recognition if no speech detected
-            if (isCaptionsEnabled) {
-                setTimeout(() => {
-                    try {
-                        recognition.start();
-                    } catch (e) {
-                        console.log('Recognition already started');
-                    }
-                }, 1000);
-            }
-        }
-    };
+        const audioStream = new MediaStream([audioTrack]);
+        mediaRecorder = new MediaRecorder(audioStream, {
+            mimeType: 'audio/webm;codecs=opus'
+        });
 
-    recognition.onend = () => {
-        if (isCaptionsEnabled) {
-            try {
-                recognition.start();
-            } catch (e) {
-                console.log('Recognition already started');
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0 && isTranscribing) {
+                // Convert blob to base64 and send to server
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64Audio = reader.result.split(',')[1];
+                    socket.emit('audio-chunk', {
+                        userId,
+                        audioData: base64Audio
+                    });
+                };
+                reader.readAsDataURL(event.data);
             }
-        }
-    };
+        };
+
+        mediaRecorder.onerror = (error) => {
+            console.error('MediaRecorder error:', error);
+        };
+
+        // Capture audio in chunks every 1 second
+        mediaRecorder.start(1000);
+        console.log('Audio streaming started');
+
+    } catch (error) {
+        console.error('Failed to initialize audio streaming:', error);
+    }
+}
+
+// Stop audio streaming
+function stopAudioStreaming() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        mediaRecorder = null;
+        console.log('Audio streaming stopped');
+    }
 }
 
 // Update captions display
@@ -721,10 +711,14 @@ function renderAllCaptions() {
     let html = '';
     activeCaptions.forEach((caption, key) => {
         const colorClass = key === 'local-user' ? 'local-caption' : 'remote-caption';
+        const originalText = caption.original || caption.text || '';
+        const translatedText = caption.translated || '';
+        
         html += `
             <div class="caption-item ${colorClass}">
                 <span class="user-name">${escapeHtml(caption.userId)}:</span>
-                <span class="caption-content">${escapeHtml(caption.text)}</span>
+                <span class="caption-content">${escapeHtml(originalText)}</span>
+                ${translatedText ? `<span class="translated-caption">${escapeHtml(translatedText)}</span>` : ''}
             </div>
         `;
     });
@@ -733,18 +727,20 @@ function renderAllCaptions() {
     captionsText.scrollTop = captionsText.scrollHeight;
 }
 
-// Display captions from other users
+// Display captions from other users (with translation support)
 function displayRemoteCaption(data) {
     if (!captionsText || !isCaptionsEnabled) return;
     
     const participant = participants.get(data.userId);
-    const displayName = participant ? participant.name : data.userId.substr(0, 10);
+    const displayName = participant ? participant.name : (data.userName || data.userId.substr(0, 10));
     const captionKey = `remote-${data.userId}`;
     
     // Update caption for this user
     activeCaptions.set(captionKey, {
         userId: displayName,
-        text: data.text,
+        original: data.original || data.text || '',
+        translated: data.translated || null,
+        targetLanguage: data.targetLanguage || null,
         timestamp: Date.now()
     });
     
@@ -774,35 +770,36 @@ if (toggleCaptionsBtn) {
                 captionsPanel.classList.remove('hidden');
             }
             
-            // Initialize and start recognition
-            if (!recognition) {
-                initSpeechRecognition();
+            // Initialize and start audio streaming
+            if (!mediaRecorder) {
+                initAudioStreaming();
             }
             
-            if (recognition) {
-                try {
-                    recognition.start();
-                    toggleCaptionsBtn.classList.add('active');
-                    captionsText.innerHTML = '<span class="caption-hint">🎤 Listening... Speak now!</span>';
-                } catch (e) {
-                    console.log('Recognition already started');
-                }
-            }
+            isTranscribing = true;
+            toggleCaptionsBtn.classList.add('active');
+            
+            // Notify server to start transcription
+            socket.emit('start-transcription', {
+                userId,
+                targetLanguage: targetTranslationLanguage
+            });
+            
+            captionsText.innerHTML = '<span class="caption-hint">🎤 Listening... Speak now!</span>';
         } else {
             // Hide captions panel
             if (captionsPanel) {
                 captionsPanel.classList.add('hidden');
             }
             
-            // Stop recognition
-            if (recognition) {
-                recognition.stop();
-                toggleCaptionsBtn.classList.remove('active');
-            }
+            // Stop transcription
+            isTranscribing = false;
+            stopAudioStreaming();
+            toggleCaptionsBtn.classList.remove('active');
+            
+            // Notify server to stop transcription
+            socket.emit('stop-transcription', { userId });
             
             // Clear all captions and timeouts
-            finalTranscript = '';
-            interimTranscript = '';
             captionTimeouts.forEach(timeout => clearTimeout(timeout));
             captionTimeouts.clear();
             activeCaptions.clear();
@@ -810,9 +807,32 @@ if (toggleCaptionsBtn) {
     });
 }
 
+// Language selector for translation
+if (translationLanguageSelect) {
+    translationLanguageSelect.addEventListener('change', (e) => {
+        targetTranslationLanguage = e.target.value || null;
+        
+        // If captions are already running, update the translation language
+        if (isTranscribing) {
+            socket.emit('set-translation-language', {
+                userId,
+                targetLanguage: targetTranslationLanguage
+            });
+        }
+        
+        console.log('Translation language set to:', targetTranslationLanguage || 'None');
+    });
+}
+
 // Listen for captions from other users
 socket.on('caption-text', (data) => {
     displayRemoteCaption(data);
+});
+
+// Listen for available languages from server
+socket.on('available-languages', (languages) => {
+    availableLanguages = languages;
+    console.log('Available translation languages:', languages);
 });
 
 // ==================== NEW UTILITY FUNCTIONS ====================

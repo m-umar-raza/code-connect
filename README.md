@@ -6,20 +6,25 @@ A fully functional video conferencing application built with WebRTC, Socket.io, 
 
 - 🎥 Real-time video calling with multiple participants
 - 🎤 Audio/Video toggle controls
-- 💬 In-meeting text chat
-- 🗣️ **AI-Powered Live Captions** (Deepgram + Web Speech API)
+- 💬 In-meeting text chat with private messaging
+- 🗣️ **AI-Powered Live Captions with Translation** (Whisper + LibreTranslate)
+- 🌍 Multi-language support with real-time translation
 - 🖥️ Screen sharing capability
+- 👥 Participants panel with live status
+- 📝 Typing indicators
+- 🔊 Speaking indicators with audio detection
 - 📱 Responsive design for mobile and desktop
 - 🔗 Simple room code sharing
-- 🎨 Premium dark theme UI
+- 🎨 Premium dark theme UI with glassmorphism
 
 ## Technologies Used
 
 - **Frontend**: HTML5, CSS3, Vanilla JavaScript
 - **Backend**: Node.js, Express
 - **Real-time Communication**: Socket.io, WebRTC
-- **Video/Audio**: getUserMedia API
-- **AI Captions**: Deepgram API (with Web Speech API fallback)
+- **Video/Audio**: getUserMedia API, MediaRecorder API
+- **AI Transcription**: Whisper (local or OpenAI API)
+- **Translation**: LibreTranslate (self-hosted or public endpoint)
 
 ## Installation & Setup
 
@@ -45,7 +50,14 @@ A fully functional video conferencing application built with WebRTC, Socket.io, 
    npm start
    ```
 
-5. Open your browser and go to:
+5. **(Optional)** Set up Whisper for transcription:
+   ```bash
+   # See WHISPER_SETUP.md for detailed instructions
+   cp .env.example .env
+   # Edit .env with your Whisper and LibreTranslate endpoints
+   ```
+
+6. Open your browser and go to:
    ```
    http://localhost:3000
    ```
@@ -53,29 +65,40 @@ A fully functional video conferencing application built with WebRTC, Socket.io, 
 ## Usage
 
 ### Creating a Meeting
-1. Click "Create New Meeting" button
-2. Allow camera and microphone permissions
-3. Share the room code with others
+1. Enter your name (optional)
+2. Click "Create New Meeting" button
+3. Allow camera and microphone permissions
+4. Share the room code with others
 
 ### Joining a Meeting
-1. Enter the room code provided by the host
-2. Click "Join Meeting"
-3. Allow camera and microphone permissions
+1. Enter your name (optional)
+2. Enter the room code provided by the host
+3. Click "Join Meeting"
+4. Allow camera and microphone permissions
 
 ### Controls
 - 🎤 Toggle microphone on/off
 - 📹 Toggle camera on/off
-- 💬 **Enable AI live captions** (Deepgram or Web Speech API)
-- 💭 Open/close chat panel
+- 💬 Enable live captions with translation
+- 💭 Open/close chat panel (Everyone or Private messaging)
+- 👥 View participants list
 - 🖥️ Share your screen
 - 📞 Leave the meeting
 
-### Using AI Captions
-1. Click the 💬 (captions) button during a call
-2. **Option 1**: Enter your Deepgram API key for best accuracy (FREE - see [DEEPGRAM_SETUP.md](DEEPGRAM_SETUP.md))
-3. **Option 2**: Click Cancel to use free Web Speech API (less accurate)
-4. Start speaking to see live transcriptions
-5. All participants will see your captions in real-time
+### Using AI Captions with Translation
+1. Click the 💬 (Captions) button during a call
+2. Select a target language from the dropdown (optional)
+3. Start speaking to see live transcriptions
+4. All participants will see captions in real-time
+5. If translation is enabled, both original and translated text will be shown
+
+**Setup Required**: See [WHISPER_SETUP.md](WHISPER_SETUP.md) for configuring local Whisper or using OpenAI's API.
+
+### Private Messaging
+1. Click the 💭 (Chat) button
+2. Switch from "Everyone" to "Private"
+3. Select a participant from the dropdown
+4. Send private messages that only they can see
 
 ## Project Structure
 
@@ -83,27 +106,33 @@ A fully functional video conferencing application built with WebRTC, Socket.io, 
 code-connect/
 ├── client/
 │   ├── index.html      # Main HTML file
-│   ├── app.js          # WebRTC and Socket.io logic
-│   └── styles.css      # Styling
-└── server/
-    ├── src/
-    │   └── index.js    # Express & Socket.io server
-    └── package.json    # Dependencies
+│   ├── app.js          # WebRTC, Socket.io, and audio streaming
+│   └── styles.css      # Premium UI styling
+├── server/
+│   ├── src/
+│   │   ├── index.js           # Express & Socket.io server
+│   │   └── transcription.js   # Whisper + LibreTranslate service
+│   ├── package.json    # Dependencies
+│   └── .env.example    # Configuration template
+├── WHISPER_SETUP.md    # Transcription setup guide
+└── README.md
 ```
 
 ## How It Works
 
 1. **Server**: Express server handles HTTP requests and Socket.io manages real-time signaling
 2. **WebRTC**: Peer-to-peer connections for video/audio streaming
-3. **Socket.io**: Signaling server for WebRTC connection establishment
+3. **Socket.io**: Signaling server for WebRTC and audio streaming for transcription
 4. **STUN Server**: Google's STUN server helps with NAT traversal
+5. **Whisper**: Local or cloud-based speech-to-text transcription
+6. **LibreTranslate**: Real-time translation service
 
 ## Browser Support
 
 - Chrome (recommended)
 - Firefox
 - Edge
-- Safari (limited support)
+- Safari (iOS 11+)
 
 ## License
 
