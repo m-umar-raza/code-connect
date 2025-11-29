@@ -64,6 +64,7 @@ const typingUser = document.getElementById('typing-user');
 const currentUserNameDisplay = document.getElementById('current-user-name');
 const userInfoBadge = document.getElementById('user-info');
 const translationLanguageSelect = document.getElementById('translation-language');
+const translationStatus = document.getElementById('translation-status');
 
 // ICE servers configuration (STUN/TURN)
 const iceServers = {
@@ -775,26 +776,47 @@ function initWebSpeechAPI() {
     return true;
 }
 
-// Translate text using LibreTranslate API
+// Translate text using MyMemory Translation API (free, no API key required)
 async function translateText(text, targetLang) {
-    if (!text || !targetLang) return null;
+    if (!text || !targetLang) {
+        console.log('Translation skipped: missing text or target language');
+        return null;
+    }
+    
+    console.log(`Translating "${text.substring(0, 50)}..." to ${targetLang}`);
+    
+    if (translationStatus) {
+        translationStatus.textContent = `Translating to ${targetLang}...`;
+    }
     
     try {
-        const response = await fetch('https://libretranslate.com/translate', {
-            method: 'POST',
-            body: JSON.stringify({
-                q: text,
-                source: 'en',
-                target: targetLang,
-                format: 'text'
-            }),
-            headers: { 'Content-Type': 'application/json' }
-        });
+        // MyMemory Translation API - completely free, no API key needed
+        const encodedText = encodeURIComponent(text);
+        const url = `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=en|${targetLang}`;
+        
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            console.error('Translation API error:', response.status, response.statusText);
+            if (translationStatus) {
+                translationStatus.textContent = `Translation error: ${response.status}`;
+            }
+            return null;
+        }
         
         const data = await response.json();
-        return data.translatedText || text;
+        console.log('Translation result:', data.responseData.translatedText);
+        
+        if (translationStatus) {
+            translationStatus.textContent = `✓ Translating to ${targetLang}`;
+        }
+        
+        return data.responseData.translatedText || text;
     } catch (error) {
         console.error('Translation failed:', error);
+        if (translationStatus) {
+            translationStatus.textContent = `Translation failed: ${error.message}`;
+        }
         return null;
     }
 }
@@ -979,6 +1001,17 @@ socket.on('whisper-unavailable', (data) => {
 if (translationLanguageSelect) {
     translationLanguageSelect.addEventListener('change', (e) => {
         targetTranslationLanguage = e.target.value || null;
+        
+        console.log('Translation language changed to:', targetTranslationLanguage);
+        
+        // Update status message
+        if (translationStatus) {
+            if (targetTranslationLanguage) {
+                translationStatus.textContent = `Translation enabled: ${e.target.options[e.target.selectedIndex].text}`;
+            } else {
+                translationStatus.textContent = '';
+            }
+        }
         
         // If captions are already running, update the translation language
         if (isTranscribing) {
