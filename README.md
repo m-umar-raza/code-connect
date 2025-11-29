@@ -62,6 +62,24 @@ A fully functional video conferencing application built with WebRTC, Socket.io, 
    http://localhost:3000
    ```
 
+## Deployment
+
+### Deploy to Render.com
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+**Quick Deploy**:
+1. Click the button above or go to https://dashboard.render.com/
+2. Connect your GitHub account
+3. Select this repository: `m-umar-raza/code-connect`
+4. Render will automatically detect `render.yaml` and configure everything
+5. Add environment variables (optional):
+   - `OPENAI_API_KEY` - For Whisper transcription (if using OpenAI)
+   - Other variables are pre-configured
+6. Click "Apply" and wait for deployment
+
+**Detailed Instructions**: See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive deployment guide, troubleshooting, and configuration options.
+
 ## Usage
 
 ### Creating a Meeting
