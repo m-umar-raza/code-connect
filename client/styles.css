@@ -1407,6 +1407,7 @@ input[type="text"]::placeholder {
         border-radius: 24px 24px 0 0;
         max-height: calc(75vh - 100px);
         animation: slideUpMobile 0.3s ease;
+        z-index: 100;
     }
 
     @keyframes slideUpMobile {
@@ -1487,11 +1488,13 @@ input[type="text"]::placeholder {
         position: sticky;
         bottom: 0;
         background: rgba(15, 15, 15, 0.98);
+        -webkit-backdrop-filter: blur(20px);
         backdrop-filter: blur(20px);
         flex-direction: column;
         gap: 10px;
         padding: 12px 12px 20px;
         border-top: 1px solid var(--border-color);
+        z-index: 50;
     }
 
     .control-buttons {
@@ -1551,6 +1554,7 @@ input[type="text"]::placeholder {
         -webkit-backdrop-filter: blur(20px);
         backdrop-filter: blur(20px);
         border-top: 1px solid var(--border-color);
+        z-index: 20;
     }
 
     .typing-indicator {
