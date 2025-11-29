@@ -1,0 +1,18 @@
+{
+  "name": "code-connect",
+  "version": "1.0.0",
+  "description": "Video conferencing app with AI-powered captions and translation",
+  "main": "server/src/index.js",
+  "scripts": {
+    "start": "cd server && node src/index.js",
+    "install-server": "cd server && npm install",
+    "build": "cd server && npm install",
+    "dev": "cd server && npm run dev"
+  },
+  "keywords": ["video", "conference", "webrtc", "whisper", "translation"],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

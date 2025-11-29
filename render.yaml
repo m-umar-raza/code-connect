@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: code-connect
+    env: node
+    buildCommand: cd server && npm install
+    startCommand: cd server && node src/index.js
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: PORT
+        value: 3000
+      - key: WHISPER_ENDPOINT
+        value: http://localhost:8000/v1/audio/transcriptions
+      - key: LIBRETRANSLATE_ENDPOINT
+        value: https://libretranslate.com/translate
