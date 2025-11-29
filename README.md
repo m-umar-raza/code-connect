@@ -1,4 +1,4 @@
-# Video Meet - Google Meet Clone
+# Video Confrencing
 
 A fully functional video conferencing application built with WebRTC, Socket.io, and Express.
 
