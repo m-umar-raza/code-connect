@@ -7,9 +7,11 @@ A fully functional video conferencing application built with WebRTC, Socket.io, 
 - 🎥 Real-time video calling with multiple participants
 - 🎤 Audio/Video toggle controls
 - 💬 In-meeting text chat
+- 🗣️ **AI-Powered Live Captions** (Deepgram + Web Speech API)
 - 🖥️ Screen sharing capability
 - 📱 Responsive design for mobile and desktop
 - 🔗 Simple room code sharing
+- 🎨 Premium dark theme UI
 
 ## Technologies Used
 
@@ -17,6 +19,7 @@ A fully functional video conferencing application built with WebRTC, Socket.io, 
 - **Backend**: Node.js, Express
 - **Real-time Communication**: Socket.io, WebRTC
 - **Video/Audio**: getUserMedia API
+- **AI Captions**: Deepgram API (with Web Speech API fallback)
 
 ## Installation & Setup
 
@@ -62,9 +65,17 @@ A fully functional video conferencing application built with WebRTC, Socket.io, 
 ### Controls
 - 🎤 Toggle microphone on/off
 - 📹 Toggle camera on/off
-- 💬 Open/close chat panel
+- 💬 **Enable AI live captions** (Deepgram or Web Speech API)
+- 💭 Open/close chat panel
 - 🖥️ Share your screen
 - 📞 Leave the meeting
+
+### Using AI Captions
+1. Click the 💬 (captions) button during a call
+2. **Option 1**: Enter your Deepgram API key for best accuracy (FREE - see [DEEPGRAM_SETUP.md](DEEPGRAM_SETUP.md))
+3. **Option 2**: Click Cancel to use free Web Speech API (less accurate)
+4. Start speaking to see live transcriptions
+5. All participants will see your captions in real-time
 
 ## Project Structure
 

@@ -61,6 +61,16 @@ io.on('connection', (socket) => {
       });
     });
 
+    // Handle captions/transcription
+    socket.on('caption-text', (data) => {
+      socket.to(roomId).emit('caption-text', {
+        userId: data.userId,
+        text: data.text,
+        isFinal: data.isFinal,
+        timestamp: new Date().toISOString()
+      });
+    });
+
     // Handle user disconnection
     socket.on('disconnect', () => {
       if (rooms.has(roomId)) {

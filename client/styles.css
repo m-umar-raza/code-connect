@@ -459,6 +459,68 @@ input[type="text"]::placeholder {
     box-shadow: 0 4px 16px rgba(138, 180, 248, 0.4);
 }
 
+/* Captions Panel */
+.captions-panel {
+    position: absolute;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 900px;
+    background: rgba(15, 15, 15, 0.95);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    padding: 20px 28px;
+    box-shadow: var(--shadow-xl);
+    border: 1px solid var(--border-color);
+    z-index: 45;
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+.captions-text {
+    font-size: 18px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    text-align: center;
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+}
+
+.captions-text .user-name {
+    color: var(--accent-blue);
+    font-weight: 600;
+    margin-right: 8px;
+}
+
+.captions-text .caption-hint {
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-style: italic;
+}
+
+.captions-text .remote-caption {
+    padding: 8px 0;
+}
+
+.captions-text .remote-caption .user-name {
+    color: var(--accent-green);
+}
+
 /* Controls */
 .controls {
     position: absolute;
@@ -588,6 +650,17 @@ input[type="text"]::placeholder {
         height: 60%;
         bottom: 90px;
         left: 0;
+    }
+
+    .captions-panel {
+        width: 95%;
+        bottom: 110px;
+        padding: 16px 20px;
+    }
+
+    .captions-text {
+        font-size: 16px;
+        min-height: 50px;
     }
 
     .controls {

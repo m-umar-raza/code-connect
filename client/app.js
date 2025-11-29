@@ -7,6 +7,10 @@ let roomId;
 let userId;
 let isAudioEnabled = true;
 let isVideoEnabled = true;
+let recognition;
+let isCaptionsEnabled = false;
+let finalTranscript = '';
+let interimTranscript = '';
 
 // DOM elements
 const homeScreen = document.getElementById('home-screen');
@@ -28,6 +32,9 @@ const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
 const copyCodeBtn = document.getElementById('copy-code-btn');
 const roomIdDisplay = document.getElementById('room-id');
+const toggleCaptionsBtn = document.getElementById('toggle-captions');
+const captionsPanel = document.getElementById('captions-panel');
+const captionsText = document.getElementById('captions-text');
 
 // ICE servers configuration (STUN/TURN)
 const iceServers = {
@@ -358,6 +365,11 @@ function leaveCall() {
         localStream.getTracks().forEach(track => track.stop());
     }
 
+    // Stop speech recognition
+    if (recognition) {
+        recognition.stop();
+    }
+
     // Close all peer connections
     Object.values(peers).forEach(peer => peer.close());
     peers = {};
@@ -368,3 +380,165 @@ function leaveCall() {
     // Reload page
     window.location.reload();
 }
+
+// ==================== CAPTIONS FUNCTIONALITY ====================
+
+// Initialize Speech Recognition (Web Speech API)
+function initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+        console.warn('Speech Recognition not supported in this browser');
+        if (toggleCaptionsBtn) {
+            toggleCaptionsBtn.style.display = 'none';
+        }
+        return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+        console.log('Speech recognition started');
+    };
+
+    recognition.onresult = (event) => {
+        interimTranscript = '';
+        
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            
+            if (event.results[i].isFinal) {
+                finalTranscript += transcript + ' ';
+                
+                // Broadcast captions to other users
+                socket.emit('caption-text', {
+                    userId,
+                    text: transcript,
+                    isFinal: true
+                });
+            } else {
+                interimTranscript += transcript;
+            }
+        }
+        
+        updateCaptionsDisplay();
+    };
+
+    recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error === 'no-speech') {
+            // Restart recognition if no speech detected
+            if (isCaptionsEnabled) {
+                setTimeout(() => {
+                    try {
+                        recognition.start();
+                    } catch (e) {
+                        console.log('Recognition already started');
+                    }
+                }, 1000);
+            }
+        }
+    };
+
+    recognition.onend = () => {
+        if (isCaptionsEnabled) {
+            try {
+                recognition.start();
+            } catch (e) {
+                console.log('Recognition already started');
+            }
+        }
+    };
+}
+
+// Update captions display
+function updateCaptionsDisplay() {
+    if (!captionsText) return;
+    
+    const displayText = (finalTranscript + interimTranscript).trim();
+    if (displayText) {
+        captionsText.innerHTML = `<span class="user-name">You:</span> ${escapeHtml(displayText)}`;
+        
+        // Auto-scroll
+        captionsText.scrollTop = captionsText.scrollHeight;
+        
+        // Clear old transcript after 5 seconds
+        setTimeout(() => {
+            finalTranscript = '';
+            interimTranscript = '';
+            if (!interimTranscript) {
+                captionsText.innerHTML = '<span class="caption-hint">Speak to see captions...</span>';
+            }
+        }, 5000);
+    }
+}
+
+// Display captions from other users
+function displayRemoteCaption(data) {
+    if (!captionsText || !isCaptionsEnabled) return;
+    
+    const userName = data.userId.substr(0, 10);
+    const captionHtml = `<div class="remote-caption"><span class="user-name">${userName}:</span> ${escapeHtml(data.text)}</div>`;
+    
+    captionsText.innerHTML = captionHtml;
+    captionsText.scrollTop = captionsText.scrollHeight;
+    
+    // Clear remote caption after 5 seconds
+    setTimeout(() => {
+        if (captionsText.innerHTML.includes(userName)) {
+            captionsText.innerHTML = '<span class="caption-hint">Speak to see captions...</span>';
+        }
+    }, 5000);
+}
+
+// Toggle captions
+if (toggleCaptionsBtn) {
+    toggleCaptionsBtn.addEventListener('click', () => {
+        isCaptionsEnabled = !isCaptionsEnabled;
+        
+        if (isCaptionsEnabled) {
+            // Show captions panel
+            if (captionsPanel) {
+                captionsPanel.classList.remove('hidden');
+            }
+            
+            // Initialize and start recognition
+            if (!recognition) {
+                initSpeechRecognition();
+            }
+            
+            if (recognition) {
+                try {
+                    recognition.start();
+                    toggleCaptionsBtn.classList.add('active');
+                    captionsText.innerHTML = '<span class="caption-hint">🎤 Listening... Speak now!</span>';
+                } catch (e) {
+                    console.log('Recognition already started');
+                }
+            }
+        } else {
+            // Hide captions panel
+            if (captionsPanel) {
+                captionsPanel.classList.add('hidden');
+            }
+            
+            // Stop recognition
+            if (recognition) {
+                recognition.stop();
+                toggleCaptionsBtn.classList.remove('active');
+            }
+            
+            // Clear transcripts
+            finalTranscript = '';
+            interimTranscript = '';
+        }
+    });
+}
+
+// Listen for captions from other users
+socket.on('caption-text', (data) => {
+    displayRemoteCaption(data);
+});
