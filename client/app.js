@@ -241,13 +241,45 @@ function createPeerConnection(otherUserId) {
     const peerConnection = new RTCPeerConnection(iceServers);
 
     // Add local stream tracks
-    localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
-    });
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            console.log(`Adding ${track.kind} track to peer connection for ${otherUserId}`);
+            peerConnection.addTrack(track, localStream);
+        });
+    } else {
+        console.error('Local stream not available when creating peer connection');
+    }
 
     // Handle incoming stream
     peerConnection.ontrack = (event) => {
-        addVideoElement(otherUserId, event.streams[0]);
+        console.log('Received track:', event.track.kind, 'from stream:', event.streams[0].id);
+        const stream = event.streams[0];
+        console.log('Stream audio tracks:', stream.getAudioTracks().map(t => ({
+            id: t.id,
+            enabled: t.enabled,
+            muted: t.muted,
+            readyState: t.readyState
+        })));
+        console.log('Stream video tracks:', stream.getVideoTracks().map(t => ({
+            id: t.id,
+            enabled: t.enabled,
+            muted: t.muted,
+            readyState: t.readyState
+        })));
+        addVideoElement(otherUserId, stream);
+    };
+
+    // Handle connection state changes
+    peerConnection.onconnectionstatechange = () => {
+        console.log(`Peer connection state with ${otherUserId}:`, peerConnection.connectionState);
+        if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
+            console.warn(`Connection ${peerConnection.connectionState} with ${otherUserId}, attempting to reconnect...`);
+        }
+    };
+
+    // Handle ICE connection state changes
+    peerConnection.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state with ${otherUserId}:`, peerConnection.iceConnectionState);
     };
 
     // Handle ICE candidates
@@ -315,7 +347,10 @@ async function handleIceCandidate(data) {
 // Add video element for remote user
 function addVideoElement(userId, stream) {
     // Check if video element already exists
-    if (document.getElementById(`video-${userId}`)) {
+    const existingVideo = document.getElementById(`video-${userId}`);
+    if (existingVideo) {
+        console.log(`Video element for ${userId} already exists, updating stream`);
+        existingVideo.srcObject = stream;
         return;
     }
 
@@ -329,10 +364,40 @@ function addVideoElement(userId, stream) {
     video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
+    video.playsinline = true; // For iOS
+    video.setAttribute('webkit-playsinline', ''); // For older iOS
+    video.muted = false; // Important: remote videos should NOT be muted
     
     // Set initial volume from saved preference
     const savedVolume = participantVolumes.get(userId) || 100;
     video.volume = savedVolume / 100;
+    
+    // Ensure video plays (handle autoplay policy) - critical for mobile
+    const attemptPlay = () => {
+        video.play()
+            .then(() => {
+                console.log(`Video for ${userId} is playing`);
+            })
+            .catch(err => {
+                console.warn('Autoplay prevented, will retry on interaction:', err);
+                // Retry on any user interaction
+                const playOnInteraction = () => {
+                    video.play()
+                        .then(() => {
+                            console.log(`Video for ${userId} started after user interaction`);
+                            document.removeEventListener('click', playOnInteraction);
+                            document.removeEventListener('touchstart', playOnInteraction);
+                        })
+                        .catch(e => console.error('Failed to play video:', e));
+                };
+                document.addEventListener('click', playOnInteraction, { once: true });
+                document.addEventListener('touchstart', playOnInteraction, { once: true });
+            });
+    };
+
+    // Try to play immediately and after a short delay
+    setTimeout(attemptPlay, 100);
+    setTimeout(attemptPlay, 500);
 
     const label = document.createElement('div');
     label.className = 'video-label';
@@ -347,6 +412,8 @@ function addVideoElement(userId, stream) {
     videoContainer.appendChild(label);
     videoContainer.appendChild(speakingIndicator);
     videoGrid.appendChild(videoContainer);
+    
+    console.log(`Added video element for ${userId}, audio tracks: ${stream.getAudioTracks().length}, video tracks: ${stream.getVideoTracks().length}`);
 }
 
 // Remove video element
